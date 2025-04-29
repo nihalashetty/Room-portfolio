@@ -1,46 +1,55 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { Html, Image, OrbitControls, useGLTF, useTexture } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { easing } from "maath";
 import { useControls } from "leva";
 
-function CameraRig() {
-  const objectCameraPlacement = {
-    computer1: {x: -114, y: 30, z: -70, a: -90, b: 30, c: -70},
-    mobile: {x: -105, y: 13, z: -66, a: -103, b: 33, c: -66},
+const cameraViews = {
+  default: {
+    position: [-10, 35, -15],
+    lookAt: [-110, 30, -110]
+  },
+  computer1: {
+    position: [-90, 30, -70],
+    lookAt: [-114, 30, -70]
+  },
+  mobile: {
+    position: [-103, 33, -66],
+    lookAt: [-105, 13, -66],
+    iframePosition: [0, 0, 0],
+    iframeRotation: [0, 1.57, 0]
   }
+};
 
-  const {position, computer, mobile} = useControls('Controller Name', {
-    view: {
-      value: {x: -110, y: 30, z: -110},
-      step: 0.5,
-      joystick: 'invertY'
-    },
+function CameraRig({ activeView, setActiveView }) {
+  const { position, computer, mobile } = useControls('Camera Controls', {
     position: {
       value: {x: -10, y: 35, z: -15},
       step: 0.5,
       joystick: 'invertY'
     },
     computer: false,
-    mobile: false,
+    mobile: false
   });
 
   useFrame((state, delta) => {
-    if (computer) {
-      easing.damp3(state.camera.position, [objectCameraPlacement.computer1.a, objectCameraPlacement.computer1.b, objectCameraPlacement.computer1.c], 1, delta)
-      state.camera.lookAt(objectCameraPlacement.computer1.x, objectCameraPlacement.computer1.y, objectCameraPlacement.computer1.z)
-    } else if (mobile) {
-      easing.damp3(state.camera.position, [objectCameraPlacement.mobile.a, objectCameraPlacement.mobile.b, objectCameraPlacement.mobile.c], 1, delta)
-      state.camera.lookAt(objectCameraPlacement.mobile.x, objectCameraPlacement.mobile.y, objectCameraPlacement.mobile.z)
-    } else {
-      easing.damp3(state.camera.position, [-10 + (state.pointer.x * state.viewport.width) / 1, (1 + state.pointer.y) * 10 + 35, -15], 1, delta)
-      state.camera.lookAt(-110, 30, -110)
-    }
-  })
+    const targetView = cameraViews[activeView] || cameraViews.default;
+    
+    easing.damp3(
+      state.camera.position,
+      targetView.position,
+      1,
+      delta
+    );
+    state.camera.lookAt(targetView.lookAt[0], targetView.lookAt[1], targetView.lookAt[2]);
+  });
+
+  return activeView;
 }
 
 export function Model(props) {
-  const groupRef = useRef()
+  const [activeView, setActiveView] = useState('default');
+  const groupRef = useRef();
   const { nodes, materials } = useGLTF("/room.glb");
   const baked1 = useTexture('./Part1.jpg');
   const baked2 = useTexture('./Part2.jpg');
@@ -49,564 +58,108 @@ export function Model(props) {
   baked2.flipY = false;
   baked3.flipY = false;
 
+  const { mobileIframePosition, mobileIframeRotation } = useControls('Mobile Iframe Controls', {
+    mobileIframePosition: {
+      value: { x: 0, y: 0.2, z: -0.0 }, 
+      step: 0.1
+    },
+    mobileIframeRotation: {
+      value: { x: 1.6, y: 3.13, z: -1.57 },
+      step: 0.1
+    }
+  });
+
+  const handleClick = (e) => {
+    e.stopPropagation();
+    const clickedMesh = e.object;
+    
+    console.log('=== Click Debug Info ===');
+    console.log('Click event target:', e.target);
+    console.log('Clicked mesh:', clickedMesh);
+    console.log('Current view:', activeView);
+    console.log('Clicked mesh name:', clickedMesh?.name);
+
+    if (!clickedMesh || !clickedMesh.name) {
+      console.log('Switching to default view - no valid mesh');
+      setActiveView('default');
+      return;
+    }
+
+    console.log(`Switching to view: ${clickedMesh.name}`);
+    setActiveView(clickedMesh.name);
+  };
+
   return (
     <>
-      <CameraRig />
-      {/* <mesh position={ [position.x + 1, position.y + 1, position.z + 1] } scale={ 10 } rotation-x={ -Math.PI * 0.5 }>
-        <boxGeometry />
-        <meshStandardMaterial color="lightgreen"/>
-      </mesh> */}
-      <group ref={groupRef}>
+      <CameraRig activeView={activeView} setActiveView={setActiveView} />
+      <group ref={groupRef} onClick={handleClick}>
         <mesh
+          name="computer1"
           castShadow
           receiveShadow
           geometry={nodes.Cube018.geometry}
           material={nodes.Cube018.material}
           position={[-112.54, 29.52, -70.28]}
-        ><meshBasicMaterial map={baked1} />
-        {/* occlude={'blending'} */}
-          <Html transform  wrapperClass="htmlScreen" position={[0.2, 0, 0]} rotation-y={1.57}>
+        >
+          <meshBasicMaterial map={baked1} />
+          <Html transform wrapperClass="htmlScreen" position={[0.2, 0, 0]} rotation-y={1.57}>
             <iframe id="computer1" width={1095} height={605} src="https://nihals-computer.netlify.app/" />
+            {activeView !== 'computer1' && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  background: 'transparent',
+                  cursor: 'pointer'
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveView('computer1');
+                }}
+              />
+            )}
           </Html>
         </mesh>
         <mesh
+          name="mobile"
           castShadow
           receiveShadow
           geometry={nodes.MobileScreen.geometry}
           material={nodes.MobileScreen.material}
           position={[-106.19, 18.27, -62.93]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Comuter2Screen.geometry}
-          material={nodes.Comuter2Screen.material}
-          position={[-59.58, 33.97, -108.3]}
-          rotation={[-0.25, 0.44, 0.11]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Computer3Screen.geometry}
-          material={nodes.Computer3Screen.material}
-          position={[-38.07, 29.78, -107.99]}
-          rotation={[-0.5, -0.34, -0.18]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube020.geometry}
-          material={nodes.Cube020.material}
-          position={[-58.01, 90.93, -115.94]}
-          rotation={[-Math.PI, 0, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Main_light001.geometry}
-          material={nodes.Main_light001.material}
-          position={[-74.52, 115.43, -67.61]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Main_Light_side.geometry}
-          material={nodes.Main_Light_side.material}
-          position={[-74.52, 113.94, -67.61]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube065.geometry}
-          material={nodes.Cube065.material}
-          position={[-15.24, 29.81, -107.67]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube066.geometry}
-          material={nodes.Cube066.material}
-          position={[-15.24, 39.7, -107.67]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube067.geometry}
-          material={nodes.Cube067.material}
-          position={[-15.24, 52.75, -107.67]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube068.geometry}
-          material={nodes.Cube068.material}
-          position={[-4.5, 34.76, -107.67]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube069.geometry}
-          material={nodes.Cube069.material}
-          position={[-26.01, 34.75, -107.67]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube072.geometry}
-          material={nodes.Cube072.material}
-          position={[-15.24, 11.05, -107.67]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube062.geometry}
-          material={nodes.Cube062.material}
-          position={[-4.28, 26.75, -115.58]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube063.geometry}
-          material={nodes.Cube063.material}
-          position={[-26.21, 26.75, -115.58]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube012.geometry}
-          material={nodes.Cube012.material}
-          position={[-20.51, 34.76, -98.87]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube025.geometry}
-          material={nodes.Cube025.material}
-          position={[-26.22, 26.75, -99.75]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube026.geometry}
-          material={nodes.Cube026.material}
-          position={[-15.24, 20.47, -107.67]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube121.geometry}
-          material={nodes.Cube121.material}
-          position={[-20.51, 34.76, -98.87]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube122.geometry}
-          material={nodes.Cube122.material}
-          position={[-9.91, 34.76, -98.87]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube124.geometry}
-          material={nodes.Cube124.material}
-          position={[-4.28, 26.75, -99.75]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube127.geometry}
-          material={nodes.Cube127.material}
-          position={[-20.51, 34.76, -98.87]}
-          rotation={[0, Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube027.geometry}
-          material={nodes.Cube027.material}
-          position={[-107.29, 20.46, -32.61]}
-          rotation={[0, -0.35, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube098.geometry}
-          material={nodes.Cube098.material}
-          position={[-107.29, 20.46, -32.61]}
-          rotation={[0, -0.35, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube074.geometry}
-          material={nodes.Cube074.material}
-          position={[-107.29, 22.23, -32.61]}
-          rotation={[0, -0.25, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube089.geometry}
-          material={nodes.Cube089.material}
-          position={[-106.42, 23.15, -33.22]}
-          rotation={[0, -0.11, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube077.geometry}
-          material={nodes.Cube077.material}
-          position={[-17.44, 24.71, -104.39]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube079.geometry}
-          material={nodes.Cube079.material}
-          position={[-16.38, 23.84, -104.49]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube081.geometry}
-          material={nodes.Cube081.material}
-          position={[-18.47, 23.56, -103.96]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube082.geometry}
-          material={nodes.Cube082.material}
-          position={[-20.87, 24.38, -103.96]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube101.geometry}
-          material={nodes.Cube101.material}
-          position={[-22.1, 23.51, -103.86]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube105.geometry}
-          material={nodes.Cube105.material}
-          position={[-12.52, 15.26, -103.61]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube107.geometry}
-          material={nodes.Cube107.material}
-          position={[-13.81, 14.11, -103.96]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube108.geometry}
-          material={nodes.Cube108.material}
-          position={[-13.81, 14.11, -103.96]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube109.geometry}
-          material={nodes.Cube109.material}
-          position={[-17.82, 14.94, -103.53]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube110.geometry}
-          material={nodes.Cube110.material}
-          position={[-17.82, 14.94, -103.53]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube111.geometry}
-          material={nodes.Cube111.material}
-          position={[-15.47, 14.52, -103.19]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube090.geometry}
-          material={nodes.Cube090.material}
-          position={[-13.06, 40.7, -108.6]}
-          rotation={[0, -0.99, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube091.geometry}
-          material={nodes.Cube091.material}
-          position={[-12.4, 41.61, -108.59]}
-          rotation={[0, -0.63, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube092.geometry}
-          material={nodes.Cube092.material}
-          position={[-12.4, 41.61, -108.59]}
-          rotation={[0, -0.63, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube093.geometry}
-          material={nodes.Cube093.material}
-          position={[-13.06, 42.47, -108.6]}
-          rotation={[0, -0.89, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube094.geometry}
-          material={nodes.Cube094.material}
-          position={[-13.06, 42.47, -108.6]}
-          rotation={[0, -0.89, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube103.geometry}
-          material={nodes.Cube103.material}
-          position={[-20.59, 15.48, -102.69]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube021.geometry}
-          material={nodes.Cube021.material}
-          position={[-24.16, 24.83, -102.69]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube022.geometry}
-          material={nodes.Cube022.material}
-          position={[-24.16, 24.85, -102.69]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube131.geometry}
-          material={nodes.Cube131.material}
-          position={[-106.75, 21.37, -32.99]}
-          rotation={[0, 0.01, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube132.geometry}
-          material={nodes.Cube132.material}
-          position={[-106.75, 21.37, -32.99]}
-          rotation={[0, 0.01, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube133.geometry}
-          material={nodes.Cube133.material}
-          position={[-107.29, 22.23, -32.61]}
-          rotation={[0, -0.25, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube135.geometry}
-          material={nodes.Cube135.material}
-          position={[-106.42, 23.15, -33.22]}
-          rotation={[0, -0.11, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube137.geometry}
-          material={nodes.Cube137.material}
-          position={[-17.44, 24.71, -104.33]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube139.geometry}
-          material={nodes.Cube139.material}
-          position={[-16.41, 23.84, -104.49]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube141.geometry}
-          material={nodes.Cube141.material}
-          position={[-18.47, 23.56, -103.96]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube143.geometry}
-          material={nodes.Cube143.material}
-          position={[-9.88, 21.51, -106.29]}
-          rotation={[0, -0.68, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube144.geometry}
-          material={nodes.Cube144.material}
-          position={[-9.88, 21.51, -106.29]}
-          rotation={[0, -0.68, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube145.geometry}
-          material={nodes.Cube145.material}
-          position={[-9.86, 22.42, -105.25]}
-          rotation={[0, -1.36, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube146.geometry}
-          material={nodes.Cube146.material}
-          position={[-9.86, 22.42, -105.25]}
-          rotation={[0, -1.36, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube147.geometry}
-          material={nodes.Cube147.material}
-          position={[-9.88, 23.28, -106.29]}
-          rotation={[Math.PI, -1.47, Math.PI]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube148.geometry}
-          material={nodes.Cube148.material}
-          position={[-9.88, 23.28, -106.29]}
-          rotation={[Math.PI, -1.47, Math.PI]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube150.geometry}
-          material={nodes.Cube150.material}
-          position={[-20.87, 24.38, -103.96]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube151.geometry}
-          material={nodes.Cube151.material}
-          position={[-19.75, 23.97, -103.44]}
-          rotation={[-Math.PI, 0, -Math.PI / 2]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube152.geometry}
-          material={nodes.Cube152.material}
-          position={[-19.71, 23.97, -103.44]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube154.geometry}
-          material={nodes.Cube154.material}
-          position={[-22.1, 23.51, -103.86]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube156.geometry}
-          material={nodes.Cube156.material}
-          position={[-12.52, 15.26, -103.61]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube162.geometry}
-          material={nodes.Cube162.material}
-          position={[-15.42, 14.52, -103.19]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube163.geometry}
-          material={nodes.Cube163.material}
-          position={[-13.06, 40.7, -108.6]}
-          rotation={[0, -0.99, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube169.geometry}
-          material={nodes.Cube169.material}
-          position={[-12, 43.4, -108.58]}
-          rotation={[0, -0.75, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube170.geometry}
-          material={nodes.Cube170.material}
-          position={[-12, 43.4, -108.58]}
-          rotation={[0, -0.75, 0]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Cube172.geometry}
-          material={nodes.Cube172.material}
-          position={[-20.59, 15.5, -102.69]}
-          rotation={[-Math.PI, 0, -1.57]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Poster1.geometry}
-          material={nodes.Poster1.material}
-          position={[-57.92, 77.05, -117.85]}
-          rotation={[0, -Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} />
-            <Image scale={10} position={[0.2, 0, 0]} url={'/poster1.jpg'} />
+        >
+          <meshBasicMaterial map={baked1} />
+          <Html 
+            occlude={"blending"}
+            transform 
+            wrapperClass="htmlScreen" 
+            position={[mobileIframePosition.x, mobileIframePosition.y, mobileIframePosition.z]} 
+            rotation-x={mobileIframeRotation.x}
+            rotation-y={mobileIframeRotation.y}
+            rotation-z={mobileIframeRotation.z}
+          >
+            <iframe id="mobile" width={100} height={175} src="https://www.google.com" />
+            {activeView !== 'mobile' && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  background: 'transparent',
+                  cursor: 'pointer'
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveView('mobile');
+                }}
+              />
+            )}
+          </Html>
         </mesh>
         <mesh
           castShadow
