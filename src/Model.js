@@ -116,7 +116,6 @@ export function Model(props) {
     e.stopPropagation();
     if (e.object.name === 'computer1' || e.object.name === 'mobile') {
       document.body.style.cursor = 'pointer';
-      e.object.scale.set(1.1, 1.1, 1.1);
       setHovered(true);
     }
   };
@@ -125,7 +124,6 @@ export function Model(props) {
     e.stopPropagation();
     if (e.object.name === 'computer1' || e.object.name === 'mobile') {
       document.body.style.cursor = 'default';
-      e.object.scale.set(1, 1, 1);
       setHovered(false);
     }
   };
