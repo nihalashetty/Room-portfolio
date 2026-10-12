@@ -1,21 +1,40 @@
 import React, { Suspense, useEffect, useMemo, useRef } from "react";
 import { Html, useGLTF, useTexture, useVideoTexture } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { easing } from "maath";
 import * as THREE from "three";
-import { getFocus, setFocus, useFocus, PLACEMENTS } from "./store";
+import {
+  getFocus,
+  setFocus,
+  useFocus,
+  setHovered,
+  getEntered,
+  getExposure,
+  PLACEMENTS,
+  INTRO_POS,
+  EXPOSURE,
+} from "./store";
 
 // Smoothly drives the camera. When nothing is focused it gently parallaxes with
 // the pointer for a living "overview" shot; when a device is focused it flies to
 // that device's framing. Both the position and the look-at point are eased, so
 // switching targets swings smoothly instead of snapping.
 function CameraRig() {
-  const look = useRef(new THREE.Vector3(-96, 27, -104));
+  const look = useRef(new THREE.Vector3(-78, 32, -82));
+  const enteredAt = useRef(null);
   useFrame((state, delta) => {
+    const entered = getEntered();
+    if (entered && enteredAt.current === null) enteredAt.current = state.clock.elapsedTime;
     const focus = getFocus();
     let targetPos;
     let targetLook;
-    if (focus && PLACEMENTS[focus]) {
+    let smooth = 0.55;
+    if (!entered) {
+      // Hold the opening wide shot behind the loader.
+      targetPos = INTRO_POS;
+      targetLook = [-78, 32, -82];
+      smooth = 1.0;
+    } else if (focus && PLACEMENTS[focus]) {
       targetPos = PLACEMENTS[focus].pos;
       targetLook = PLACEMENTS[focus].look;
     } else {
@@ -24,11 +43,108 @@ function CameraRig() {
       targetPos = [-8 + px * 7, 42 + py * 5, -10];
       targetLook = [-96, 27, -104];
     }
-    easing.damp3(state.camera.position, targetPos, 0.55, delta);
-    easing.damp3(look.current, targetLook, 0.55, delta);
+    // Slow, cinematic glide for the first moments after entering.
+    if (entered && enteredAt.current !== null && !focus) {
+      const since = state.clock.elapsedTime - enteredAt.current;
+      if (since < 2.6) smooth = 1.15;
+    }
+    easing.damp3(state.camera.position, targetPos, smooth, delta);
+    easing.damp3(look.current, targetLook, smooth, delta);
     state.camera.lookAt(look.current);
   });
   return null;
+}
+
+// Eases the room's brightness (tone-mapping exposure) and background toward the
+// mood set in the store. Screens and posters opt out of tone mapping, so they
+// keep their glow as the room dims — monitors light up a dark room.
+const DAY_BG = new THREE.Color("#0b1026");
+const NIGHT_BG = new THREE.Color("#050509");
+
+function LightingRig() {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const bg = useRef(new THREE.Color("#0b1026"));
+  useEffect(() => {
+    scene.background = bg.current;
+  }, [scene]);
+  useFrame((_, delta) => {
+    const target = getExposure();
+    gl.toneMappingExposure = THREE.MathUtils.damp(
+      gl.toneMappingExposure,
+      target,
+      4,
+      delta
+    );
+    const t = THREE.MathUtils.clamp(
+      (gl.toneMappingExposure - EXPOSURE.min) / (EXPOSURE.max - EXPOSURE.min),
+      0,
+      1
+    );
+    bg.current.lerpColors(NIGHT_BG, DAY_BG, t);
+  });
+  return null;
+}
+
+// Warm halos at the desk lamps that fade in as the room darkens, so the lamps
+// read as switched on at night. Additive sprites — cheap and glowy.
+function makeGlowTexture() {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, "rgba(255,226,170,1)");
+  g.addColorStop(0.35, "rgba(255,200,140,0.45)");
+  g.addColorStop(1, "rgba(255,190,130,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  return tex;
+}
+
+const LAMPS = [
+  { pos: [-104.2, 29, -47.2], scale: 20 }, // orange desk lamp (left)
+  { pos: [-22.2, 46.5, -108.5], scale: 17 }, // desk lamp (right)
+  { pos: [-58, 88, -114], scale: 34 }, // overhead tube (soft)
+];
+
+function LampGlow() {
+  const tex = useMemo(makeGlowTexture, []);
+  const group = useRef();
+  useFrame((state) => {
+    if (!group.current) return;
+    const lin = THREE.MathUtils.clamp(
+      (getExposure() - EXPOSURE.min) / (EXPOSURE.max - EXPOSURE.min),
+      0,
+      1
+    );
+    const glow = Math.pow(1 - lin, 1.4); // 0 in daylight, ~1 at night
+    const time = state.clock.elapsedTime;
+    group.current.children.forEach((spr, i) => {
+      const max = i === 2 ? 0.5 : 0.95; // overhead softer
+      // Desk lamps get a faint bulb flicker; the overhead stays steady.
+      const flicker =
+        i === 2 ? 1 : 0.93 + Math.sin(time * 8 + i) * 0.04 + Math.sin(time * 21 + i) * 0.03;
+      spr.material.opacity = glow * max * flicker;
+    });
+  });
+  return (
+    <group ref={group}>
+      {LAMPS.map((l, i) => (
+        <sprite key={i} position={l.pos} scale={[l.scale, l.scale, 1]}>
+          <spriteMaterial
+            map={tex}
+            transparent
+            opacity={0}
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+            toneMapped={false}
+          />
+        </sprite>
+      ))}
+    </group>
+  );
 }
 
 // Reads a single position component without relying on BufferAttribute.getComponent.
@@ -82,9 +198,11 @@ function VideoScreen({ geometry, position, rotation, scale, src, focusKey }) {
       onPointerOver={(e) => {
         e.stopPropagation();
         document.body.style.cursor = "pointer";
+        setHovered(true);
       }}
       onPointerOut={() => {
         document.body.style.cursor = "auto";
+        setHovered(false);
       }}
     >
       <meshBasicMaterial map={texture} toneMapped={false} />
@@ -142,9 +260,11 @@ function WindowsScreen({ geometry, material, position, baked }) {
       onPointerOver={(e) => {
         e.stopPropagation();
         document.body.style.cursor = "pointer";
+        setHovered(true);
       }}
       onPointerOut={() => {
         document.body.style.cursor = "auto";
+        setHovered(false);
       }}
     >
       <meshBasicMaterial map={baked} />
@@ -169,6 +289,62 @@ function WindowsScreen({ geometry, material, position, baked }) {
   );
 }
 
+// Slow-drifting dust motes that catch the lamp light — barely there by day,
+// atmospheric at night.
+function Dust() {
+  const tex = useMemo(makeGlowTexture, []);
+  const ref = useRef();
+  const positions = useMemo(() => {
+    const N = 300;
+    const arr = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      arr[i * 3] = -5 - Math.random() * 110;
+      arr[i * 3 + 1] = 8 + Math.random() * 95;
+      arr[i * 3 + 2] = -5 - Math.random() * 110;
+    }
+    return arr;
+  }, []);
+  useFrame((state) => {
+    if (!ref.current) return;
+    const t = state.clock.elapsedTime;
+    ref.current.rotation.y = t * 0.008;
+    ref.current.position.y = Math.sin(t * 0.1) * 1.5;
+    const darkness = Math.pow(
+      1 -
+        THREE.MathUtils.clamp(
+          (getExposure() - EXPOSURE.min) / (EXPOSURE.max - EXPOSURE.min),
+          0,
+          1
+        ),
+      1.2
+    );
+    ref.current.material.opacity = 0.07 + darkness * 0.3;
+  });
+  return (
+    <points ref={ref}>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          count={positions.length / 3}
+          array={positions}
+          itemSize={3}
+        />
+      </bufferGeometry>
+      <pointsMaterial
+        map={tex}
+        size={1.3}
+        sizeAttenuation
+        transparent
+        depthWrite={false}
+        opacity={0.12}
+        blending={THREE.AdditiveBlending}
+        color="#ffe7c4"
+        toneMapped={false}
+      />
+    </points>
+  );
+}
+
 // A framed photo poster with a slow, looping Ken Burns drift so the wall art
 // feels alive. The texture is cover-fit to the plane (no stretching) and then
 // gently panned and zoomed within the frame over ~2 minutes.
@@ -186,7 +362,7 @@ function MountainPoster({ url, position, rotation, size, phase = 0 }) {
     const planeAspect = size[0] / size[1];
     const imgAspect = img.width / img.height;
     const t = state.clock.elapsedTime + phase;
-    const zoom = 1.07 + Math.sin(t * 0.06) * 0.05; // 1.02 .. 1.12
+    const zoom = 1.05 + Math.sin(t * 0.06) * 0.035; // 1.015 .. 1.085 — gentle drift
     let rx, ry;
     if (imgAspect > planeAspect) {
       ry = 1 / zoom;
@@ -266,6 +442,9 @@ export function Model(props) {
   return (
     <>
       <CameraRig />
+      <LightingRig />
+      <LampGlow />
+      <Dust />
       {/* <mesh position={ [position.x + 1, position.y + 1, position.z + 1] } scale={ 10 } rotation-x={ -Math.PI * 0.5 }>
         <boxGeometry />
         <meshStandardMaterial color="lightgreen"/>
@@ -838,16 +1017,16 @@ export function Model(props) {
             placed just in front of each frame, with a slow Ken Burns drift). */}
         <MountainPoster
           url="/poster-a.jpg"
-          position={[-57.92, 77, -117.35]}
+          position={[-57.92, 77.05, -117.6]}
           rotation={[0, 0, 0]}
-          size={[19.5, 23.3]}
+          size={[19.58, 23.59]}
           phase={0}
         />
         <MountainPoster
           url="/poster-b.jpg"
-          position={[-117.35, 77, -59.62]}
+          position={[-117.75, 77.05, -59.62]}
           rotation={[0, Math.PI / 2, 0]}
-          size={[50, 21]}
+          size={[56.29, 23.59]}
           phase={30}
         />
         <mesh

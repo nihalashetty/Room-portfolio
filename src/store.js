@@ -1,5 +1,5 @@
-// A tiny external store so the focus state can be shared between the DOM UI
-// (loader, back button) and the R3F scene, which live in separate React
+// A tiny external store so UI state can be shared between the DOM overlay
+// (loader, controls, cursor) and the R3F scene, which live in separate React
 // reconcilers. Using useSyncExternalStore keeps this dependency-free and
 // avoids coupling to a specific zustand version.
 import { useSyncExternalStore } from "react";
@@ -13,21 +13,33 @@ export const PLACEMENTS = {
   mobile: { pos: [-99, 26, -62.9], look: [-106.2, 18.5, -62.9] },
 };
 
-let state = { focus: null };
+// Where the camera starts the intro reveal, before easing into the overview.
+export const INTRO_POS = [40, 70, 80];
+
+// Lighting presets (target tone-mapping exposure). Lower = dimmer room; the
+// screens and posters keep their own brightness, so they glow at night.
+export const EXPOSURE = { min: 0.16, max: 1.45, day: 1.12, dusk: 0.6, night: 0.26 };
+
+let state = {
+  focus: null,
+  exposure: EXPOSURE.day,
+  entered: false,
+  hovered: false,
+};
 const listeners = new Set();
 
 function emit() {
   for (const l of listeners) l();
 }
 
-export function setFocus(focus) {
-  if (state.focus === focus) return;
-  state = { ...state, focus };
+function update(patch) {
+  let changed = false;
+  for (const k in patch) {
+    if (state[k] !== patch[k]) changed = true;
+  }
+  if (!changed) return;
+  state = { ...state, ...patch };
   emit();
-}
-
-export function getFocus() {
-  return state.focus;
 }
 
 function subscribe(listener) {
@@ -35,17 +47,37 @@ function subscribe(listener) {
   return () => listeners.delete(listener);
 }
 
+// --- focus (click-to-focus on a device) ---
+export const setFocus = (focus) => update({ focus });
+export const getFocus = () => state.focus;
+
+// --- lighting / mood ---
+export const setExposure = (exposure) => update({ exposure });
+export const getExposure = () => state.exposure;
+
+// --- intro reveal (set true once the loader finishes) ---
+export const setEntered = (entered) => update({ entered });
+export const getEntered = () => state.entered;
+
+// --- hover (an interactive 3D object is under the pointer) ---
+export const setHovered = (hovered) => update({ hovered });
+
 // Dev-only helper so the scene can be driven from the console / automated
 // screenshots. Guarded so it never runs in a production build.
 if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
   window.__roomSetFocus = setFocus;
+  window.__roomSetExposure = setExposure;
 }
 
-// React hook for DOM components that need to re-render on focus changes.
-export function useFocus() {
+function useField(key) {
   return useSyncExternalStore(
     subscribe,
-    () => state.focus,
-    () => state.focus
+    () => state[key],
+    () => state[key]
   );
 }
+
+export const useFocus = () => useField("focus");
+export const useExposure = () => useField("exposure");
+export const useEntered = () => useField("entered");
+export const useHovered = () => useField("hovered");
