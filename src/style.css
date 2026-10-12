@@ -14,8 +14,273 @@ body,
   left: 0;
   height: 100%;
   width: 100%;
+  overflow: hidden;
+  background: #0b1026;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial,
+    sans-serif;
 }
 
 iframe {
   user-select: none;
+  border: none;
+}
+
+/* The drei <Html> screen keeps its crispness and ignores pointer events until
+   the camera has flown in (toggled from JS). */
+.htmlScreen iframe {
+  background: #000;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cute loader                                                         */
+/* ------------------------------------------------------------------ */
+.loader {
+  position: fixed;
+  inset: 0;
+  /* Above drei's <Html>, which raises the canvas z-index into the ~8.4M range
+     (its default zIndexRange tops out at 16777271). */
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+      120% 120% at 50% 0%,
+      #1b2350 0%,
+      #0b1026 55%,
+      #070a18 100%
+    );
+  transition: opacity 0.8s ease, visibility 0.8s ease;
+}
+
+.loader--hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.loader__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 26px;
+  text-align: center;
+  animation: loader-pop 0.6s cubic-bezier(0.18, 0.89, 0.32, 1.28) both;
+}
+
+.loader__art {
+  overflow: visible;
+  filter: drop-shadow(0 12px 24px rgba(37, 99, 235, 0.25));
+}
+
+.loader__plant {
+  transform-origin: 17px 60px;
+  animation: loader-sway 2.6s ease-in-out infinite;
+}
+
+.loader__face {
+  animation: loader-blink 3.2s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.loader__title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #eef2ff;
+}
+
+.loader__bar {
+  width: 240px;
+  max-width: 70vw;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.loader__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6d28d9, #2563eb, #06b6d4);
+  background-size: 200% 100%;
+  animation: loader-shimmer 1.6s linear infinite;
+  transition: width 0.3s ease;
+}
+
+.loader__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #93a4cf;
+}
+
+.loader__pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #c7d2fe;
+}
+
+.loader__dots i {
+  animation: loader-dots 1.4s infinite both;
+  font-style: normal;
+}
+.loader__dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.loader__dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes loader-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes loader-sway {
+  0%,
+  100% {
+    transform: rotate(-4deg);
+  }
+  50% {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes loader-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes loader-shimmer {
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes loader-dots {
+  0% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* In-scene UI overlay                                                 */
+/* ------------------------------------------------------------------ */
+.ui {
+  position: fixed;
+  inset: 0;
+  /* Above the canvas/<Html> stack (see .loader) so the Back button stays
+     clickable even over the focused Windows iframe. */
+  z-index: 2147483646;
+  pointer-events: none;
+  color: #eef2ff;
+}
+
+.ui__hint {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(10, 14, 30, 0.55);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  color: #c7d2fe;
+  white-space: nowrap;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.ui__hint--focused {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
+}
+
+.ui__back {
+  position: absolute;
+  top: 22px;
+  left: 22px;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 10px 13px;
+  border-radius: 999px;
+  background: rgba(10, 14, 30, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #eef2ff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateX(-12px);
+  transition: opacity 0.35s ease, transform 0.35s ease, background 0.2s ease;
+}
+
+.ui__back:hover {
+  background: rgba(37, 99, 235, 0.55);
+}
+
+.ui__back--show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.ui__title {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  text-align: right;
+  line-height: 1.25;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(10, 14, 30, 0.42);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+}
+
+.ui__title b {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.ui__title span {
+  display: block;
+  font-size: 12px;
+  color: #93a4cf;
+  font-weight: 500;
+}
+
+@media (max-width: 640px) {
+  .ui__title {
+    display: none;
+  }
+  .ui__hint {
+    font-size: 12px;
+    bottom: 18px;
+  }
 }

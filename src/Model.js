@@ -1,42 +1,172 @@
-import React, { useRef } from "react";
-import { Html, Image, OrbitControls, useGLTF, useTexture } from "@react-three/drei";
+import React, { Suspense, useMemo, useRef } from "react";
+import { Html, Image, useGLTF, useTexture, useVideoTexture } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { easing } from "maath";
-import { useControls } from "leva";
+import * as THREE from "three";
+import { getFocus, setFocus, useFocus, PLACEMENTS } from "./store";
 
+// Smoothly drives the camera. When nothing is focused it gently parallaxes with
+// the pointer for a living "overview" shot; when a device is focused it flies to
+// that device's framing. Both the position and the look-at point are eased, so
+// switching targets swings smoothly instead of snapping.
 function CameraRig() {
-  const objectCameraPlacement = {
-    computer1: {x: -114, y: 30, z: -70, a: -90, b: 30, c: -70},
-    mobile: {x: -105, y: 13, z: -66, a: -103, b: 33, c: -66},
-  }
-
-  const {position, computer, mobile} = useControls('Controller Name', {
-    view: {
-      value: {x: -110, y: 30, z: -110},
-      step: 0.5,
-      joystick: 'invertY'
-    },
-    position: {
-      value: {x: -10, y: 35, z: -15},
-      step: 0.5,
-      joystick: 'invertY'
-    },
-    computer: false,
-    mobile: false,
-  });
-
+  const look = useRef(new THREE.Vector3(-96, 27, -104));
   useFrame((state, delta) => {
-    if (computer) {
-      easing.damp3(state.camera.position, [objectCameraPlacement.computer1.a, objectCameraPlacement.computer1.b, objectCameraPlacement.computer1.c], 1, delta)
-      state.camera.lookAt(objectCameraPlacement.computer1.x, objectCameraPlacement.computer1.y, objectCameraPlacement.computer1.z)
-    } else if (mobile) {
-      easing.damp3(state.camera.position, [objectCameraPlacement.mobile.a, objectCameraPlacement.mobile.b, objectCameraPlacement.mobile.c], 1, delta)
-      state.camera.lookAt(objectCameraPlacement.mobile.x, objectCameraPlacement.mobile.y, objectCameraPlacement.mobile.z)
+    const focus = getFocus();
+    let targetPos;
+    let targetLook;
+    if (focus && PLACEMENTS[focus]) {
+      targetPos = PLACEMENTS[focus].pos;
+      targetLook = PLACEMENTS[focus].look;
     } else {
-      easing.damp3(state.camera.position, [-10 + (state.pointer.x * state.viewport.width) / 1, (1 + state.pointer.y) * 10 + 35, -15], 1, delta)
-      state.camera.lookAt(-110, 30, -110)
+      const px = state.pointer.x;
+      const py = state.pointer.y;
+      targetPos = [-8 + px * 7, 42 + py * 5, -10];
+      targetLook = [-96, 27, -104];
     }
-  })
+    easing.damp3(state.camera.position, targetPos, 0.55, delta);
+    easing.damp3(look.current, targetLook, 0.55, delta);
+    state.camera.lookAt(look.current);
+  });
+  return null;
+}
+
+// Reads a single position component without relying on BufferAttribute.getComponent.
+function vcomp(attr, i, axis) {
+  return axis === 0 ? attr.getX(i) : axis === 1 ? attr.getY(i) : attr.getZ(i);
+}
+
+// A screen surface that plays a looping video. It reuses the baked screen
+// geometry (so it lands exactly where the original screen was) but rebuilds the
+// UVs as a flat planar projection, so the video fills the whole screen instead
+// of sampling the baked-atlas sub-region. Because it is real scene geometry it
+// is always correctly occluded by other objects and is clickable for focus.
+function VideoScreen({ geometry, position, rotation, scale, src, focusKey }) {
+  const texture = useVideoTexture(src);
+  const geo = useMemo(() => {
+    const g = geometry.clone();
+    g.computeBoundingBox();
+    const bb = g.boundingBox;
+    const size = new THREE.Vector3();
+    bb.getSize(size);
+    const s = [size.x, size.y, size.z];
+    // The screen is near-flat: its thinnest axis is the surface normal.
+    let nAxis = 0;
+    for (let i = 1; i < 3; i++) if (s[i] < s[nAxis]) nAxis = i;
+    const rest = [0, 1, 2].filter((a) => a !== nAxis);
+    const uAxis = s[rest[0]] >= s[rest[1]] ? rest[0] : rest[1];
+    const vAxis = uAxis === rest[0] ? rest[1] : rest[0];
+    const min = [bb.min.x, bb.min.y, bb.min.z];
+    const pos = g.attributes.position;
+    const uv = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) {
+      const u = (vcomp(pos, i, uAxis) - min[uAxis]) / (s[uAxis] || 1);
+      const v = (vcomp(pos, i, vAxis) - min[vAxis]) / (s[vAxis] || 1);
+      uv[i * 2] = u;
+      uv[i * 2 + 1] = 1 - v;
+    }
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    return g;
+  }, [geometry]);
+
+  return (
+    <mesh
+      geometry={geo}
+      position={position}
+      rotation={rotation}
+      scale={scale}
+      onClick={(e) => {
+        e.stopPropagation();
+        setFocus(focusKey);
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        document.body.style.cursor = "pointer";
+      }}
+      onPointerOut={() => {
+        document.body.style.cursor = "auto";
+      }}
+    >
+      <meshBasicMaterial map={texture} toneMapped={false} />
+    </mesh>
+  );
+}
+
+// Wraps VideoScreen in its own Suspense so the whole room appears immediately
+// and each screen "turns on" once its video is ready (dark = screen off).
+function Screen({ geometry, position, rotation, scale, src, focusKey }) {
+  return (
+    <Suspense
+      fallback={
+        <mesh
+          geometry={geometry}
+          position={position}
+          rotation={rotation}
+          scale={scale}
+          onClick={(e) => {
+            e.stopPropagation();
+            setFocus(focusKey);
+          }}
+        >
+          <meshBasicMaterial color="#0a0b14" toneMapped={false} />
+        </mesh>
+      }
+    >
+      <VideoScreen
+        geometry={geometry}
+        position={position}
+        rotation={rotation}
+        scale={scale}
+        src={src}
+        focusKey={focusKey}
+      />
+    </Suspense>
+  );
+}
+
+// The main-left monitor keeps Nihal's Windows clone in an iframe. `occlude`
+// makes real geometry draw in front of it (fixing the "iframe covers the room"
+// problem), and the iframe only accepts pointer input once the camera has flown
+// in, so the first click simply focuses the screen.
+function WindowsScreen({ geometry, material, position, baked }) {
+  const focused = useFocus() === "computer1";
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      position={position}
+      onClick={(e) => {
+        e.stopPropagation();
+        setFocus("computer1");
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        document.body.style.cursor = "pointer";
+      }}
+      onPointerOut={() => {
+        document.body.style.cursor = "auto";
+      }}
+    >
+      <meshBasicMaterial map={baked} />
+      <Html
+        transform
+        wrapperClass="htmlScreen"
+        position={[0.2, 0, 0]}
+        rotation-y={1.57}
+        occlude="blending"
+        style={{ pointerEvents: focused ? "auto" : "none" }}
+      >
+        <iframe
+          title="Nihal's Windows clone"
+          id="computer1"
+          width={1095}
+          height={605}
+          src="https://nihals-computer.netlify.app/"
+          style={{ pointerEvents: focused ? "auto" : "none" }}
+        />
+      </Html>
+    </mesh>
+  );
 }
 
 export function Model(props) {
@@ -57,41 +187,32 @@ export function Model(props) {
         <meshStandardMaterial color="lightgreen"/>
       </mesh> */}
       <group ref={groupRef}>
-        <mesh
-          castShadow
-          receiveShadow
+        <WindowsScreen
           geometry={nodes.Cube018.geometry}
           material={nodes.Cube018.material}
           position={[-112.54, 29.52, -70.28]}
-        ><meshBasicMaterial map={baked1} />
-        {/* occlude={'blending'} */}
-          <Html transform  wrapperClass="htmlScreen" position={[0.2, 0, 0]} rotation-y={1.57}>
-            <iframe id="computer1" width={1095} height={605} src="https://nihals-computer.netlify.app/" />
-          </Html>
-        </mesh>
-        <mesh
-          castShadow
-          receiveShadow
+          baked={baked1}
+        />
+        <Screen
           geometry={nodes.MobileScreen.geometry}
-          material={nodes.MobileScreen.material}
           position={[-106.19, 18.27, -62.93]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
+          src="/screen3.webm"
+          focusKey="mobile"
+        />
+        <Screen
           geometry={nodes.Comuter2Screen.geometry}
-          material={nodes.Comuter2Screen.material}
           position={[-59.58, 33.97, -108.3]}
           rotation={[-0.25, 0.44, 0.11]}
-        ><meshBasicMaterial map={baked1} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
+          src="/screen1.webm"
+          focusKey="computer2"
+        />
+        <Screen
           geometry={nodes.Computer3Screen.geometry}
-          material={nodes.Computer3Screen.material}
           position={[-38.07, 29.78, -107.99]}
           rotation={[-0.5, -0.34, -0.18]}
-        ><meshBasicMaterial map={baked1} /></mesh>
+          src="/screen2.webm"
+          focusKey="computer3"
+        />
         <mesh
           castShadow
           receiveShadow
