@@ -1,5 +1,5 @@
-import React, { Suspense, useMemo, useRef } from "react";
-import { Html, Image, useGLTF, useTexture, useVideoTexture } from "@react-three/drei";
+import React, { Suspense, useEffect, useMemo, useRef } from "react";
+import { Html, useGLTF, useTexture, useVideoTexture } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { easing } from "maath";
 import * as THREE from "three";
@@ -166,6 +166,90 @@ function WindowsScreen({ geometry, material, position, baked }) {
         />
       </Html>
     </mesh>
+  );
+}
+
+// A framed photo poster with a slow, looping Ken Burns drift so the wall art
+// feels alive. The texture is cover-fit to the plane (no stretching) and then
+// gently panned and zoomed within the frame over ~2 minutes.
+function MountainPoster({ url, position, rotation, size, phase = 0 }) {
+  const texture = useTexture(url);
+  useEffect(() => {
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+  }, [texture]);
+  useFrame((state) => {
+    const img = texture.image;
+    if (!img || !img.width) return;
+    const planeAspect = size[0] / size[1];
+    const imgAspect = img.width / img.height;
+    const t = state.clock.elapsedTime + phase;
+    const zoom = 1.07 + Math.sin(t * 0.06) * 0.05; // 1.02 .. 1.12
+    let rx, ry;
+    if (imgAspect > planeAspect) {
+      ry = 1 / zoom;
+      rx = planeAspect / imgAspect / zoom;
+    } else {
+      rx = 1 / zoom;
+      ry = (imgAspect / planeAspect) / zoom;
+    }
+    const mx = Math.max(0, 1 - rx);
+    const my = Math.max(0, 1 - ry);
+    texture.repeat.set(rx, ry);
+    texture.offset.set(
+      mx * (0.5 + 0.5 * Math.sin(t * 0.05)),
+      my * (0.5 + 0.5 * Math.cos(t * 0.043))
+    );
+  });
+  return (
+    <mesh position={position} rotation={rotation}>
+      <planeGeometry args={[size[0], size[1]]} />
+      <meshBasicMaterial map={texture} toneMapped={false} />
+    </mesh>
+  );
+}
+
+// An office chair that lazily swivels back and forth, as if someone just got up.
+// The meshes share an origin at the base of the chair's pole, so the group
+// rotates them around that vertical axis.
+function SwivelChair({ pivot, rotation, geometries, baked, amp = 0.2, speed = 0.45, phase = 0 }) {
+  const ref = useRef();
+  useFrame((state) => {
+    if (!ref.current) return;
+    const t = state.clock.elapsedTime;
+    ref.current.rotation.y =
+      Math.sin(t * speed + phase) * amp + Math.sin(t * 0.17 + phase) * amp * 0.35;
+  });
+  return (
+    <group ref={ref} position={pivot}>
+      {geometries.map((g, i) => (
+        <mesh key={i} geometry={g} rotation={rotation}>
+          <meshBasicMaterial map={baked} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// A gentle breeze sway for plants / foliage.
+function Sway({ pivot, items, baked, ampX = 0.015, ampZ = 0.02, speed = 0.6, phase = 0 }) {
+  const ref = useRef();
+  useFrame((state) => {
+    if (!ref.current) return;
+    const t = state.clock.elapsedTime * speed + phase;
+    ref.current.rotation.x = Math.sin(t) * ampX;
+    ref.current.rotation.z = Math.cos(t * 0.8) * ampZ;
+  });
+  return (
+    <group ref={ref} position={pivot}>
+      {items.map((it, i) => (
+        <mesh key={i} geometry={it.geo} rotation={it.rot}>
+          <meshBasicMaterial map={baked} />
+        </mesh>
+      ))}
+    </group>
   );
 }
 
@@ -726,9 +810,7 @@ export function Model(props) {
           material={nodes.Poster1.material}
           position={[-57.92, 77.05, -117.85]}
           rotation={[0, -Math.PI / 2, 0]}
-        ><meshBasicMaterial map={baked1} />
-            <Image scale={10} position={[0.2, 0, 0]} url={'/poster1.jpg'} />
-        </mesh>
+        ><meshBasicMaterial map={baked1} /></mesh>
         <mesh
           castShadow
           receiveShadow
@@ -751,6 +833,23 @@ export function Model(props) {
           material={nodes.Poster1007.material}
           position={[-117.98, 77.05, -59.62]}
         ><meshBasicMaterial map={baked1} /></mesh>
+
+        {/* Mountain posters inside the two empty wall frames (world-space planes
+            placed just in front of each frame, with a slow Ken Burns drift). */}
+        <MountainPoster
+          url="/poster-a.jpg"
+          position={[-57.92, 77, -117.35]}
+          rotation={[0, 0, 0]}
+          size={[19.5, 23.3]}
+          phase={0}
+        />
+        <MountainPoster
+          url="/poster-b.jpg"
+          position={[-117.35, 77, -59.62]}
+          rotation={[0, Math.PI / 2, 0]}
+          size={[50, 21]}
+          phase={30}
+        />
         <mesh
           castShadow
           receiveShadow
@@ -1324,20 +1423,17 @@ export function Model(props) {
           position={[-63.13, 22.76, -99.25]}
           rotation={[Math.PI / 2, 0, 0]}
         ><meshBasicMaterial map={baked2} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Plant.geometry}
-          material={nodes.Plant.material}
-          position={[-108.67, 18.09, -108.84]}
-        ><meshBasicMaterial map={baked2} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Plant003.geometry}
-          material={nodes.Plant003.material}
-          position={[-108.67, 18.09, -108.84]}
-        ><meshBasicMaterial map={baked2} /></mesh>
+        <Sway
+          pivot={[-108.67, 18.09, -108.84]}
+          baked={baked2}
+          ampX={0.012}
+          ampZ={0.016}
+          speed={0.5}
+          items={[
+            { geo: nodes.Plant.geometry, rot: [0, 0, 0] },
+            { geo: nodes.Plant003.geometry, rot: [0, 0, 0] },
+          ]}
+        />
         <mesh
           castShadow
           receiveShadow
@@ -1393,38 +1489,20 @@ export function Model(props) {
           position={[-104.9, 19.54, -56.55]}
           rotation={[0, -0.32, 0]}
         ><meshBasicMaterial map={baked2} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.eb_house_plant_03.geometry}
-          material={nodes.eb_house_plant_03.material}
-          position={[-108.66, 0.18, -1.46]}
-          rotation={[Math.PI / 2, 0, 2.93]}
-        ><meshBasicMaterial map={baked2} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.eb_house_plant_03001.geometry}
-          material={nodes.eb_house_plant_03001.material}
-          position={[-108.66, 0.18, -1.46]}
-          rotation={[Math.PI / 2, 0, 2.93]}
-        ><meshBasicMaterial map={baked2} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.eb_house_plant_03003.geometry}
-          material={nodes.eb_house_plant_03003.material}
-          position={[-108.66, 0.18, -1.46]}
-          rotation={[Math.PI / 2, 0, 2.93]}
-        ><meshBasicMaterial map={baked2} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.eb_house_plant_03006.geometry}
-          material={nodes.eb_house_plant_03006.material}
-          position={[-108.66, 0.18, -1.46]}
-          rotation={[Math.PI / 2, 0, 2.93]}
-        ><meshBasicMaterial map={baked2} /></mesh>
+        <Sway
+          pivot={[-108.66, 0.18, -1.46]}
+          baked={baked2}
+          ampX={0.02}
+          ampZ={0.028}
+          speed={0.7}
+          phase={1.6}
+          items={[
+            { geo: nodes.eb_house_plant_03.geometry, rot: [Math.PI / 2, 0, 2.93] },
+            { geo: nodes.eb_house_plant_03001.geometry, rot: [Math.PI / 2, 0, 2.93] },
+            { geo: nodes.eb_house_plant_03003.geometry, rot: [Math.PI / 2, 0, 2.93] },
+            { geo: nodes.eb_house_plant_03006.geometry, rot: [Math.PI / 2, 0, 2.93] },
+          ]}
+        />
         <mesh
           castShadow
           receiveShadow
@@ -1455,70 +1533,34 @@ export function Model(props) {
           position={[0.11, 59.31, -118.58]}
           rotation={[Math.PI / 2, 0, Math.PI]}
         ><meshBasicMaterial map={baked3} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Chair001.geometry}
-          material={nodes.Chair001.material}
-          position={[-48.02, 0.24, -85.46]}
+        <SwivelChair
+          pivot={[-48.02, 0.24, -85.46]}
           rotation={[Math.PI / 2, 0, -0.37]}
-        ><meshBasicMaterial map={baked3} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Chair003.geometry}
-          material={nodes.Chair003.material}
-          position={[-48.02, 0.24, -85.46]}
-          rotation={[Math.PI / 2, 0, -0.37]}
-        ><meshBasicMaterial map={baked3} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Chair008.geometry}
-          material={nodes.Chair008.material}
-          position={[-48.02, 0.24, -85.46]}
-          rotation={[Math.PI / 2, 0, -0.37]}
-        ><meshBasicMaterial map={baked3} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Chair010.geometry}
-          material={nodes.Chair010.material}
-          position={[-48.02, 0.24, -85.46]}
-          rotation={[Math.PI / 2, 0, -0.37]}
-        ><meshBasicMaterial map={baked3} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Chair005.geometry}
-          material={nodes.Chair005.material}
-          position={[-83.08, 0.2, -60]}
+          baked={baked3}
+          amp={0.18}
+          speed={0.5}
+          phase={0}
+          geometries={[
+            nodes.Chair001.geometry,
+            nodes.Chair003.geometry,
+            nodes.Chair008.geometry,
+            nodes.Chair010.geometry,
+          ]}
+        />
+        <SwivelChair
+          pivot={[-83.08, 0.2, -60]}
           rotation={[Math.PI / 2, 0, -2.41]}
-        ><meshBasicMaterial map={baked3} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Chair012.geometry}
-          material={nodes.Chair012.material}
-          position={[-83.08, 0.2, -60]}
-          rotation={[Math.PI / 2, 0, -2.41]}
-        ><meshBasicMaterial map={baked3} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Chair014.geometry}
-          material={nodes.Chair014.material}
-          position={[-83.08, 0.2, -60]}
-          rotation={[Math.PI / 2, 0, -2.41]}
-        ><meshBasicMaterial map={baked3} /></mesh>
-        <mesh
-          castShadow
-          receiveShadow
-          geometry={nodes.Chair015.geometry}
-          material={nodes.Chair015.material}
-          position={[-83.08, 0.2, -60]}
-          rotation={[Math.PI / 2, 0, -2.41]}
-        ><meshBasicMaterial map={baked3} /></mesh>
+          baked={baked3}
+          amp={0.24}
+          speed={0.38}
+          phase={2.1}
+          geometries={[
+            nodes.Chair005.geometry,
+            nodes.Chair012.geometry,
+            nodes.Chair014.geometry,
+            nodes.Chair015.geometry,
+          ]}
+        />
       </group>
     </>
   );
