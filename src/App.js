@@ -1,18 +1,27 @@
-import React, { Suspense, useRef } from 'react'
-import { Canvas } from '@react-three/fiber'
-import { Html, OrbitControls, Stage } from '@react-three/drei'
-import { Model } from './Model'
-import { Controls } from './Controls'
+import React, { Suspense } from "react";
+import { Canvas } from "@react-three/fiber";
+import "./style.css";
+import { Model } from "./Model";
+import { Loader } from "./Loader";
+import { Ui } from "./Ui";
+import { setFocus } from "./store";
 
 export default function Viewer() {
-  const ref = useRef()
   return (
-    <Canvas shadows camera={{ fov: 50 }} dpr={[1, 2]}>
-      <Controls />
-      <Suspense fallback={null} >
+    <>
+      <Canvas
+        camera={{ fov: 50, near: 0.1, far: 2000, position: [-8, 42, -10] }}
+        dpr={[1, 2]}
+        // Clicking empty space returns to the room overview.
+        onPointerMissed={() => setFocus(null)}
+      >
+        <color attach="background" args={["#0b1026"]} />
+        <Suspense fallback={null}>
           <Model />
-      </Suspense>
-      <OrbitControls ref={ref} />
-    </Canvas>
-  )
+        </Suspense>
+      </Canvas>
+      <Ui />
+      <Loader />
+    </>
+  );
 }
